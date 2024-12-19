@@ -6,6 +6,7 @@ import platform
 import requests
 import os
 import json
+import subprocess
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -162,35 +163,59 @@ class DexScreenerScraper:
         logger.debug(f"Pair age check result: {result}")
         return result
 
+    def cleanup_temp_files(self):
+        try:
+            if platform.system() == "Linux":
+                try:
+                    subprocess.run(["pkill", "-f", "chrome"], check=False)
+                    subprocess.run(["pkill", "-f", "chromedriver"], check=False)
+                    logger.debug("Cleaned up Chrome processes")
+                except Exception as e:
+                    logger.error(f"Error cleaning up Chrome processes: {str(e)}", exc_info=True)
+
+        except Exception as e:
+            logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
+
     def scrape(self):
         logger.info("Starting scraping process")
         try:
-            with SB(uc=True, incognito=True, xvfb=True, headless=False) as sb:
-                logger.info(f"Opening URL: {self.url}")
-                sb.uc_open_with_reconnect(self.url, 5)
+            with SB(uc=True, incognito=True, xvfb=True, undetectable=True, page_load_strategy="eager") as sb:
+                try:
+                    logger.info(f"Opening URL: {self.url}")
+                    sb.uc_open_with_reconnect(self.url, 5)
 
-                logger.info("Handling captcha based on platform")
-                if platform.system() == "Linux":
-                    logger.debug("Linux platform detected, using uc_gui_click_captcha")
-                    sb.uc_gui_click_captcha()
-                else:
-                    logger.debug("Non-Linux platform detected, using uc_gui_handle_captcha")
-                    sb.uc_gui_handle_captcha()
+                    logger.info("Handling captcha based on platform")
+                    if platform.system() == "Linux":
+                        logger.debug("Linux platform detected, using uc_gui_click_captcha")
+                        sb.uc_gui_click_captcha()
+                    else:
+                        logger.debug("Non-Linux platform detected, using uc_gui_handle_captcha")
+                        sb.uc_gui_handle_captcha()
 
-                for i in range(1, 101):
-                    coin_selector = sb.find_element(f'//*[@id="root"]/div/main/div/div[4]/a[{i}]')
-                    coin_data = self.get_coin_data(coin_selector)
-                    token_address = coin_data["ds_url"].split("/")[-1]
+                    for i in range(1, 101):
+                        coin_selector = sb.find_element(f'//*[@id="root"]/div/main/div/div[4]/a[{i}]')
+                        coin_data = self.get_coin_data(coin_selector)
+                        token_address = coin_data["ds_url"].split("/")[-1]
 
-                    if (
-                        not self.was_token_sent_recently(token_address)
-                        and self.check_price_changes(coin_data)
-                        and self.check_pair_age(coin_data["pair_age"])
-                    ):
-                        self.send_to_telegram(coin_data)
+                        if (
+                            not self.was_token_sent_recently(token_address)
+                            and self.check_price_changes(coin_data)
+                            and self.check_pair_age(coin_data["pair_age"])
+                        ):
+                            self.send_to_telegram(coin_data)
+                finally:
+                    try:
+                        sb.clear_session_storage()
+                        sb.delete_all_cookies()
+                        sb.driver.quit()
+                    except Exception as e:
+                        logger.error(f"Error during browser cleanup: {e}")
+
         except Exception as e:
             logger.error(f"Scraping failed: {str(e)}", exc_info=True)
             raise
+        finally:
+            self.cleanup_temp_files()
 
 
 if __name__ == "__main__":
@@ -199,3 +224,6 @@ if __name__ == "__main__":
         scraper.scrape()
     except Exception as e:
         logger.error(f"Application failed: {str(e)}", exc_info=True)
+    finally:
+        if "scraper" in locals():
+            scraper.cleanup_temp_files()
