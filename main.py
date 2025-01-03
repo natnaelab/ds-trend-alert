@@ -1,6 +1,7 @@
 import logging
 from logging.handlers import RotatingFileHandler
 from seleniumbase import SB
+from seleniumbase.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 import platform
 import requests
