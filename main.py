@@ -28,7 +28,7 @@ class DexScreenerScraper:
         self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
         self.scraperapi_api_key = os.getenv("SCRAPERAPI_API_KEY")
-        self.url = "https://dexscreener.com/?rankBy=trendingScoreM5&order=desc&chainIds=solana&minMarketCap=40000&maxMarketCap=800000"
+        self.url = "https://dexscreener.com/?rankBy=trendingScoreH6&order=desc&chainIds=solana&minLiq=20000&minMarketCap=1000000&maxMarketCap=5000000&maxAge=2&min24HVol=20000"
         self.price_change_fields = ["price-change-m5", "price-change-h1", "price-change-h6", "price-change-h24"]
         self.coin_data_fields = {
             "ds_url": {"attr": "href"},
@@ -91,13 +91,14 @@ class DexScreenerScraper:
         token_address = coin_data["ds_url"].split("/")[-1]
         logger.info(f"Preparing to send Telegram message for token {coin_data['token_symbol']} ({token_address})")
         message_format = """
-        🚀 <b>New Fast Mover</b>
+🚨 <b>1 MILLION MARKETCAP MOVER</b> 🚨
 
-💎 <b>Coin:</b> {}
+📊 <b>Coin:</b> {}
 💰 <b>Market Cap:</b> {}
-⏰ <b>Age:</b> {}
+⚡️ <b>Age:</b> {}
 📈 <b>Volume:</b> {}
-🔗 <b>Contract Address: </b> <a href="{}">{}</a>
+
+🔗 <a href="{}">View on DexScreener</a>
 """
         send_message_url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
         params = {
@@ -108,7 +109,6 @@ class DexScreenerScraper:
                 coin_data["pair_age"],
                 coin_data["volume"],
                 coin_data["ds_url"],
-                token_address,
             ),
             "parse_mode": "HTML",
         }
@@ -139,43 +139,6 @@ class DexScreenerScraper:
             logger.error(f"Error getting coin data: {str(e)}", exc_info=True)
             raise
 
-    def check_price_changes(self, coin_data):
-        try:
-            logger.debug(f"Checking price changes for {coin_data['token_symbol']}")
-            price_changes = [
-                float(coin_data[field].replace("%", "").replace(",", "")) for field in self.price_change_fields
-            ]
-            logger.debug(f"Price changes: {dict(zip(self.price_change_fields, price_changes))}")
-            result = all(change > 0 for change in price_changes)
-            logger.debug(f"Price change check result: {result}")
-            return result
-        except ValueError as e:
-            logger.error(f"Error parsing price changes for {coin_data.get('token_symbol', 'unknown')}: {str(e)}")
-            return False
-
-    def check_pair_age(self, pair_age):
-        logger.debug(f"Checking pair age: {pair_age}")
-        if not pair_age or not pair_age[:-1].isdigit():
-            logger.debug(f"Invalid pair age format: {pair_age}")
-            return False
-        value = float(pair_age[:-1])
-        result = pair_age.endswith("m") or (pair_age.endswith("h") and value <= 24)
-        logger.debug(f"Pair age check result: {result}")
-        return result
-
-    def cleanup_temp_files(self):
-        try:
-            if platform.system() == "Linux":
-                try:
-                    subprocess.run(["pkill", "-f", "chrome"], check=False)
-                    subprocess.run(["pkill", "-f", "chromedriver"], check=False)
-                    logger.debug("Cleaned up Chrome processes")
-                except Exception as e:
-                    logger.error(f"Error cleaning up Chrome processes: {str(e)}", exc_info=True)
-
-        except Exception as e:
-            logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
-
     def scrape(self):
         logger.info("Starting scraping process")
         try:
@@ -193,15 +156,15 @@ class DexScreenerScraper:
                         sb.uc_gui_handle_captcha()
 
                     for i in range(1, 101):
-                        coin_selector = sb.find_element(f'//*[@id="root"]/div/main/div/div[4]/a[{i}]')
+                        try:
+                            coin_selector = sb.find_element(f'//*[@id="root"]/div/main/div/div[4]/a[{i}]')
+                        except NoSuchElementException:
+                            logger.debug(f"No more coins found, stopping at index {i}")
+                            break
                         coin_data = self.get_coin_data(coin_selector)
                         token_address = coin_data["ds_url"].split("/")[-1]
 
-                        if (
-                            not self.was_token_sent_recently(token_address)
-                            and self.check_price_changes(coin_data)
-                            and self.check_pair_age(coin_data["pair_age"])
-                        ):
+                        if not self.was_token_sent_recently(token_address):
                             self.send_to_telegram(coin_data)
                 finally:
                     try:
@@ -216,6 +179,19 @@ class DexScreenerScraper:
             raise
         finally:
             self.cleanup_temp_files()
+
+    def cleanup_temp_files(self):
+        try:
+            if platform.system() == "Linux":
+                try:
+                    subprocess.run(["pkill", "-f", "chrome"], check=False)
+                    subprocess.run(["pkill", "-f", "chromedriver"], check=False)
+                    logger.debug("Cleaned up Chrome processes")
+                except Exception as e:
+                    logger.error(f"Error cleaning up Chrome processes: {str(e)}", exc_info=True)
+
+        except Exception as e:
+            logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
 
 
 if __name__ == "__main__":
